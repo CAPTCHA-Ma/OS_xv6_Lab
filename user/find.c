@@ -4,7 +4,7 @@
 #include "user/user.h"
 #include "kernel/fs.h"
 
-void recurse(char *path, char *fm)
+void recurse(char *path, char *fm, char** argv)
 {
 
     char buf[512], *p;
@@ -40,12 +40,39 @@ void recurse(char *path, char *fm)
 
         case T_DIR:
         
-            recurse(buf, fm);
+            recurse(buf, fm, argv);
             break;
 
         case T_FILE:
 
-            if (!strcmp(de.name, fm)) printf("%s\n", buf);
+            if (!strcmp(p, fm)) 
+            {
+
+                if (argv != 0)
+                {
+
+                    char *nargv[32];
+                    int l = 0;
+
+                    while (argv[l] != 0 && l < 31)
+                    {
+
+                        nargv[l] = argv[l];
+                        ++l;
+
+                    }
+
+                    nargv[l++] = p;
+                    nargv[l] = 0;
+                    
+                    if (fork() == 0) exec(nargv[0], nargv);
+
+                    wait(0);
+
+                }
+                else printf("%s\n", buf);
+
+            }
             break;
 
         }
@@ -59,10 +86,10 @@ void recurse(char *path, char *fm)
 int main(int argc, char *argv[])
 {
 
-    if (argc != 3)
+    if (argc < 3 || argc == 4 || (argc > 4 && strcmp(argv[3], "-exec")))
     {
 
-        fprintf(2, "usage: find [path] [name]\n");
+        fprintf(2, "usage: find [path] [name] (-exec cmd)\n");
         exit(1);
 
     }
@@ -98,6 +125,8 @@ int main(int argc, char *argv[])
     }
 
     close(fd);
-    recurse(path, name);
+
+    if (argc == 3) recurse(path, name, 0);
+    else recurse(path, name, &argv[4]);
 
 }
