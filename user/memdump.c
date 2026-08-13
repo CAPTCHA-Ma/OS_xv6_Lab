@@ -4,6 +4,14 @@
 
 void memdump(char *fmt, char *data);
 
+char dtoh(int num)
+{
+
+  if (num >= 0 && num <= 9) return (char)('0' + num);
+  else return (char)('A' + num - 10);
+
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -61,5 +69,129 @@ void
 memdump(char *fmt, char *data)
 {
   // Your code here.
+
+  char *f = fmt;
+  char *p = data;
+
+  while (*f != '\0')
+  {
+
+    switch (*f)
+    {
+
+    case 'i':
+    {
+
+      int sum = 0, base = 1;
+      for (int i = 0; i < 4; ++i)
+      {
+        
+        int tmp = (int)*p;
+        sum += tmp * base;
+        ++p;
+        base *= 256;
+
+      }
+
+      printf("%d\n", sum);
+
+      break;
+
+    }
+
+    case 'p':
+    {      
+      
+      char ans[16];
+      for (int i = 0; i < 8; ++i)
+      {
+
+        int l = (int)*p / 16,
+          r = (int)*p % 16;
+
+        
+        ans[2 * i + 1] = dtoh(l);
+        ans[2 * i] = dtoh(r);
+
+        ++p;
+
+      }
+
+      int i = 15;
+      for (; i >= 0; i--)
+      {
+
+        if (ans[i] != '0') break;
+
+      }
+
+      if (i == 16) printf("0\n");
+      else
+      {
+
+        for (; i >= 0; i--) printf("%c", ans[i]);
+        printf("\n");
+
+      }
+
+      break;
+    
+    }
+
+    case 'h':
+    {
+
+      int sum = 0, base = 1;
+      for (int i = 0; i < 2; ++i)
+      {
+
+        sum += (int)*p * base;
+        base *= 256;
+
+        ++p;
+
+      }
+
+      printf("%d\n", sum);
+
+      break;
+
+    }
+
+    case 'c':
+    {
+
+      printf("%c\n", *p);
+      ++p;
+
+      break;
+
+    }
+
+    case 's':
+    {
+
+      printf("%s\n", *(char **)p);
+
+      p += 8;
+
+      break;
+
+    }
+
+    case 'S':
+    {
+
+      printf("%s\n", p);
+
+      break;
+
+    }
+
+    }
+
+    ++f;
+
+  }
 
 }
