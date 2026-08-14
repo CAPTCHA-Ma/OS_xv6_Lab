@@ -110,11 +110,14 @@ uint64 sys_interpose(void)
 {
 
   int mask;
+  char path[MAXPATH];
   struct proc *p = myproc();
 
   argint(0, &mask);
-  if (mask < 0) return -1;
+  if (mask < 0 || argstr(1, path, MAXPATH) < 0) return -1;
   p->sandbox_mask = mask;
+
+  safestrcpy(p->allowed_path, path, sizeof(p->allowed_path));
 
   return 0;
 

@@ -147,6 +147,7 @@ found:
   p->context.sp = p->kstack + PGSIZE;
 
   p->sandbox_mask = 0;
+  p->allowed_path[0] = '\0';
 
   return p;
 }
@@ -172,6 +173,7 @@ freeproc(struct proc *p)
   p->xstate = 0;
   p->state = UNUSED;
   p->sandbox_mask = 0;
+  p->allowed_path[0] = '\0';
 }
 
 // Create a user page table for a given process, with no user memory,
