@@ -146,6 +146,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->sandbox_mask = 0;
+
   return p;
 }
 
@@ -169,6 +171,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->sandbox_mask = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -288,6 +291,8 @@ kfork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
+
+  np->sandbox_mask = p->sandbox_mask;
 
   release(&np->lock);
 
