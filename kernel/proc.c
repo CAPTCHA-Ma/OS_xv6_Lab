@@ -125,6 +125,11 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+  p->ticks = 0;
+  p->handler = 0;
+  p->cticks = 0;
+  p->alarm_active = 0;
+
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -169,6 +174,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->ticks = 0;
+  p->handler = 0;
+  p->cticks = 0;
+  p->alarm_active = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -278,6 +287,11 @@ kfork(void)
 
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
+
+  np->ticks = p->ticks;
+  np->handler = p->handler;
+  np->cticks = 0;
+  np->alarm_active = 0;
 
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
