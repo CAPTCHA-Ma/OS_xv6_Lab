@@ -23,11 +23,24 @@ struct {
   struct run *freelist;
 } kmem;
 
+#define NSUPERPG 16
+
+struct {
+  struct spinlock lock;
+  struct run *freelist;
+} supermem;
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  initlock(&supermem.lock, "supermem");
+  freerange(end, (void*)(PHYSTOP - NSUPERPG * SUPERPGSIZE));
+  for(char *p = (char*)(PHYSTOP - NSUPERPG * SUPERPGSIZE);
+      p + SUPERPGSIZE <= (char*)PHYSTOP;
+      p += SUPERPGSIZE)
+    superfree(p);
+
 }
 
 void
@@ -79,4 +92,41 @@ kalloc(void)
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void superfree(void *pa)
+{
+
+  struct run *r;
+
+  if(((uint64)pa % SUPERPGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("superfree");
+
+  memset(pa, 1, SUPERPGSIZE);
+
+  r = (struct run*)pa;
+
+  acquire(&supermem.lock);
+  r->next = supermem.freelist;
+  supermem.freelist = r;
+  release(&supermem.lock);
+  
+}
+
+void * superalloc(void)
+{
+
+  struct run *r;
+
+  acquire(&supermem.lock);
+  r = supermem.freelist;
+  if(r)
+    supermem.freelist = r->next;
+  release(&supermem.lock);
+
+  if(r)
+    memset((char*)r, 5, SUPERPGSIZE);
+
+  return (void*)r;
+
 }
