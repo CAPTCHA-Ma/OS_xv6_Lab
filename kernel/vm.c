@@ -17,6 +17,8 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+static uint64 cowfault(pagetable_t pagetable, uint64 va);
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -299,28 +301,34 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       continue;   // page table entry hasn't been allocated
     if((*pte & PTE_V) == 0)
       continue;   // physical page hasn't been allocated
+
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+
+    if(flags & PTE_W) flags = (flags | PTE_COW) & ~PTE_W;
+
+    if (mappages(new, i, PGSIZE, pa, flags) != 0)
+    {
+
+      uvmunmap(new, 0, i / PGSIZE, 1);
+      return -1;
+
     }
+
+    if ((*pte & PTE_W) != 0) *pte = PA2PTE(pa) | flags;
+
+    krfadd(pa);
+
   }
+
   return 0;
 
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
 }
 
 // mark a PTE invalid for user access.
@@ -349,7 +357,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     va0 = PGROUNDDOWN(dstva);
     if(va0 >= MAXVA)
       return -1;
-  
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0) {
       if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
@@ -358,10 +366,14 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     }
 
     pte = walk(pagetable, va0, 0);
-    // forbid copyout over read-only user text pages.
-    if((*pte & PTE_W) == 0)
-      return -1;
-      
+    if ((*pte & PTE_W) == 0)
+    {
+
+      if ((*pte & PTE_COW) == 0) return -1;
+      if ((pa0 = cowfault(pagetable, va0)) == 0) return -1;
+
+    }
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -449,18 +461,65 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 // that was lazily allocated in sys_sbrk().
 // returns 0 if va is invalid or already mapped, or if
 // out of physical memory, and physical address if successful.
+static uint64 cowfault(pagetable_t pagetable, uint64 va)
+{
+
+  pte_t *pte;
+  uint64 pa, mem;
+  uint flags;
+
+  va = PGROUNDDOWN(va);
+  if (va >= MAXVA) return 0;
+
+  pte = walk(pagetable, va, 0);
+  if (pte == 0) return 0;
+  if ((*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 || (*pte & PTE_COW) == 0) return 0;
+
+  pa = PTE2PA(*pte);
+  flags = (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW;
+
+  if (krfget(pa) == 1)
+  {
+
+    *pte = PA2PTE(pa) | flags;
+
+    return pa;
+
+  }
+
+  mem = (uint64)kalloc();
+  if (mem == 0) return 0;
+
+  memmove((void*)mem, (void*)pa, PGSIZE);
+  *pte = PA2PTE(mem) | flags;
+  kfree((void*)pa);
+
+  return mem;
+
+}
+
 uint64
 vmfault(pagetable_t pagetable, uint64 va, int read)
 {
   uint64 mem;
+  pte_t *pte;
   struct proc *p = myproc();
 
   if (va >= p->sz)
     return 0;
   va = PGROUNDDOWN(va);
-  if(ismapped(pagetable, va)) {
+
+  pte = walk(pagetable, va, 0);
+
+  if (pte != 0 && (*pte & PTE_V) != 0)
+  {
+
+    if(read == 0 && (*pte & PTE_COW) != 0) return cowfault(pagetable, va);
+
     return 0;
+
   }
+
   mem = (uint64) kalloc();
   if(mem == 0)
     return 0;

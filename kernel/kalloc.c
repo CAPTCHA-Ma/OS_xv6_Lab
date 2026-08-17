@@ -23,11 +23,62 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct
+{
+
+  struct spinlock lock;
+  uint16 rfcnt[RFSZ];
+
+} krfcnt;
+
+static int pa2idx(uint64 pa)
+{
+
+  return (pa - KERNBASE) / PGSIZE;
+
+}
+
+void krfadd(uint64 pa)
+{
+
+  acquire(&krfcnt.lock);
+  ++krfcnt.rfcnt[pa2idx(pa)];
+  release(&krfcnt.lock);
+
+}
+
+void krfminus(uint64 pa)
+{
+
+  acquire(&krfcnt.lock);
+
+  if(krfcnt.rfcnt[pa2idx(pa)] < 1) panic("krfminus");
+  --krfcnt.rfcnt[pa2idx(pa)];
+
+  release(&krfcnt.lock);
+
+}
+
+int krfget(uint64 pa)
+{
+
+  int cnt;
+
+  acquire(&krfcnt.lock);
+  cnt = krfcnt.rfcnt[pa2idx(pa)];
+  release(&krfcnt.lock);
+  return cnt;
+
+}
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&krfcnt.lock, "krfcnt");
+
   freerange(end, (void*)PHYSTOP);
+
 }
 
 void
@@ -36,7 +87,14 @@ freerange(void *pa_start, void *pa_end)
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  {
+
+    acquire(&krfcnt.lock);
+    krfcnt.rfcnt[pa2idx((uint64)p)] = 1;
+    release(&krfcnt.lock);
     kfree(p);
+    
+  }
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -47,9 +105,26 @@ void
 kfree(void *pa)
 {
   struct run *r;
+  int idx;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
+
+  idx = pa2idx((uint64)pa);
+
+  acquire(&krfcnt.lock);
+
+  if (krfcnt.rfcnt[idx] < 1) panic("kfree rfcnt");
+  --krfcnt.rfcnt[idx];
+  if (krfcnt.rfcnt[idx] > 0)
+  { 
+
+    release(&krfcnt.lock);
+    return;
+
+  }
+
+  release(&krfcnt.lock);
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
@@ -77,6 +152,18 @@ kalloc(void)
   release(&kmem.lock);
 
   if(r)
+  {
+
     memset((char*)r, 5, PGSIZE); // fill with junk
+
+    acquire(&krfcnt.lock);
+
+    if(krfcnt.rfcnt[pa2idx((uint64)r)] != 0) panic("kalloc rfcnt");
+    krfcnt.rfcnt[pa2idx((uint64)r)] = 1;
+
+    release(&krfcnt.lock);
+
+  }
+
   return (void*)r;
 }
