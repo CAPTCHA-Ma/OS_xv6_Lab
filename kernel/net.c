@@ -10,6 +10,28 @@
 #include "file.h"
 #include "net.h"
 
+#define NPORT 64
+#define NSIZE 16
+
+struct udp_rx 
+{
+
+  char *buf;
+  int len;
+  uint32 src;
+  uint16 sport;
+
+};
+
+struct udp_port
+{
+
+  uint16 dport;
+  int l, r, count;
+  struct udp_rx buf[NSIZE];
+
+} ports[NPORT];
+
 // xv6's ethernet and IP addresses
 static uint8 local_mac[ETHADDR_LEN] = { 0x52, 0x54, 0x00, 0x12, 0x34, 0x56 };
 static uint32 local_ip = MAKE_IP_ADDR(10, 0, 2, 15);
@@ -25,6 +47,26 @@ netinit(void)
   initlock(&netlock, "netlock");
 }
 
+struct udp_port * bufget(uint16 dport)
+{
+
+  for (int i = 0; i < NPORT; i++)
+  {
+
+    struct udp_port *buf = &ports[i];
+
+    if (buf->dport == dport)
+    {
+
+      return buf;
+
+    }
+
+  }
+
+  return 0;
+
+}
 
 //
 // bind(int port)
@@ -34,11 +76,48 @@ netinit(void)
 uint64
 sys_bind(void)
 {
+
   //
   // Your code here.
   //
 
+  int port;
+  argint(0, &port);
+  if (port < 0 || port > 0xffff) return -1;
+
+  acquire(&netlock);
+
+  if (bufget((uint16)port))
+  {
+
+    release(&netlock);
+    return 0;
+
+  }
+
+  for (int i = 0; i < NPORT; i++)
+  {
+
+    struct udp_port *pbuf = &ports[i];
+
+    if (!pbuf->dport)
+    {
+
+      pbuf->dport = port;
+      pbuf->r = 0;
+      pbuf->l = 0;
+      pbuf->count = 0;
+
+      release(&netlock);
+      return 0;
+
+    }
+
+  }
+
+  release(&netlock);
   return -1;
+
 }
 
 //
@@ -77,7 +156,58 @@ sys_recv(void)
   //
   // Your code here.
   //
-  return -1;
+
+  struct proc *p = myproc();
+  int port, maxlen;
+  uint64 srcaddr, sportaddr, bufaddr;
+
+  argint(0, &port);
+  argaddr(1, &srcaddr);
+  argaddr(2, &sportaddr);
+  argaddr(3, &bufaddr);
+  argint(4, &maxlen);
+
+  if(port < 0 || port > 0xffff || maxlen < 0)
+    return -1;
+
+  acquire(&netlock);
+
+  struct udp_port *pbuf = bufget((uint16)port);
+  if (pbuf == 0)
+  {
+
+    release(&netlock);
+    return -1;
+
+  }
+
+  while (pbuf->count == 0) sleep(pbuf, &netlock);
+
+  struct udp_rx pkt = pbuf->buf[pbuf->l];
+  pbuf->buf[pbuf->l].buf = 0;
+  pbuf->l = (pbuf->l + 1) % NSIZE;
+  pbuf->count--;
+
+  release(&netlock);
+
+  int n = pkt.len;
+  if (n > maxlen) n = maxlen;
+
+  char *payload = pkt.buf + sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp);
+
+  if (copyout(p->pagetable, srcaddr, (char *)&pkt.src, sizeof(pkt.src)) < 0 ||
+      copyout(p->pagetable, sportaddr, (char *)&pkt.sport, sizeof(pkt.sport)) < 0 ||
+      copyout(p->pagetable, bufaddr, payload, n) < 0)
+  {
+
+    kfree(pkt.buf);
+    return -1;
+
+  }
+
+  kfree(pkt.buf);
+  return n;
+
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
@@ -191,6 +321,44 @@ ip_rx(char *buf, int len)
   //
   // Your code here.
   //
+
+  if (len < sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp))
+  {
+
+    kfree(buf);
+    return;
+
+  }
+
+  struct eth *eth = (struct eth *)buf;
+  struct ip *ip = (struct ip *)(eth + 1);
+  struct udp *udp = (struct udp *)(ip + 1);
+
+  uint16 dport = ntohs(udp->dport);
+
+  acquire(&netlock);
+
+  struct udp_port *pbuf = bufget(dport);
+  if (pbuf == 0 || pbuf->count == NSIZE)
+  {
+
+    release(&netlock);
+    kfree(buf);
+    return;
+
+  }
+
+  struct udp_rx *pkt = &pbuf->buf[pbuf->r];
+  pkt->buf = buf;
+  pkt->len = ntohs(udp->ulen) - sizeof(struct udp);
+  pkt->src = ntohl(ip->ip_src);
+  pkt->sport = ntohs(udp->sport);
+
+  pbuf->r = (pbuf->r + 1) % NSIZE;
+  ++(pbuf->count);  
+
+  wakeup(pbuf);
+  release(&netlock);
   
 }
 

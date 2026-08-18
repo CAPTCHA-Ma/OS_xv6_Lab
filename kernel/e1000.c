@@ -142,12 +142,12 @@ e1000_recv(void)
   // Create and deliver a buf for each packet (using net_rx()).
   //
 
-  acquire(&e1000_lock);
-
   static int idx = 0;
   
-  while (rx_ring[idx].status == E1000_RXD_STAT_DD)
+  while (rx_ring[idx].status & E1000_RXD_STAT_DD)
   {
+
+    acquire(&e1000_lock);
 
     char *buf = (char *) rx_ring[idx].addr;
     int len = rx_ring[idx].length;
@@ -156,13 +156,13 @@ e1000_recv(void)
     rx_ring[idx].status = 0;
     regs[E1000_RDT] = idx;
 
-    net_rx(buf, len);
-
     idx = (idx + 1) % RX_RING_SIZE;
 
-  }
+    release(&e1000_lock);
 
-  release(&e1000_lock);
+    net_rx(buf, len);
+
+  }
 
 }
 
