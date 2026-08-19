@@ -20,5 +20,6 @@ struct rwspinlock {
   struct spinlock cl;
   int rc;
   int wc;
+  int w;
 };
 #endif

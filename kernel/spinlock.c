@@ -130,10 +130,8 @@ read_acquire_inner(struct rwspinlock *rwlk)
 
     acquire(&rwlk->cl);
 
-    if (!rwlk->wc)
+    if (!rwlk->wc && !rwlk->w)
     {
-
-      if (!rwlk->rc) acquire(&rwlk->l);
 
       ++rwlk->rc;
 
@@ -157,8 +155,6 @@ read_release_inner(struct rwspinlock *rwlk)
 
   --rwlk->rc;
 
-  if (!rwlk->rc) release(&rwlk->l);
-
   release(&rwlk->cl);
 
 }
@@ -171,9 +167,20 @@ write_acquire_inner(struct rwspinlock *rwlk)
 
   ++rwlk->wc;
 
-  release(&rwlk->cl);
+  while (rwlk->rc || rwlk->w)
+  {
 
-  acquire(&rwlk->l);
+    release(&rwlk->cl);
+
+    acquire(&rwlk->cl);
+
+  }
+
+  --rwlk->wc;
+
+  rwlk->w = 1;
+
+  release(&rwlk->cl);
   
 }
 
@@ -183,9 +190,7 @@ write_release_inner(struct rwspinlock *rwlk)
   
   acquire(&rwlk->cl);
 
-  release(&rwlk->l);
-
-  --rwlk->wc;
+  rwlk->w = 0;
   
   release(&rwlk->cl);
 
@@ -225,6 +230,7 @@ initrwlock(struct rwspinlock *rwlk)
   // Replace this with your implementation.
   rwlk->rc = 0;
   rwlk->wc = 0;
+  rwlk->w = 0;
   initlock(&rwlk->l, "rwlk");
   initlock(&rwlk->cl, "rwlk");
 }
