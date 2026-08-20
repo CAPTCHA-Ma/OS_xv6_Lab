@@ -7,6 +7,9 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "fs.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -386,7 +389,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0) {
-      if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+      if((pa0 = vmfault(pagetable, va0, 1)) == 0) {
         return -1;
       }
     }
@@ -452,22 +455,69 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 uint64
 vmfault(pagetable_t pagetable, uint64 va, int read)
 {
+  
+  uint64 va0 = PGROUNDDOWN(va);
   uint64 mem;
   struct proc *p = myproc();
 
-  if (va >= p->sz)
-    return 0;
-  va = PGROUNDDOWN(va);
-  if(ismapped(pagetable, va)) {
-    return 0;
+  for (int i = 0; i < 16; i++)
+  { 
+
+    struct vma *v = &p->nvma[i];
+    if (v->status && va0 >= v->addr && va0 < v->addr + v->len)
+    {
+
+      if (ismapped(pagetable, va0)) return 0;
+      if (read && !(v->prot & PROT_READ)) return 0;
+      if (!read && !(v->prot & PROT_WRITE)) return 0;
+
+      mem = (uint64)kalloc();
+      if (mem == 0) return 0;
+      memset((void *)mem, 0, PGSIZE);
+
+      ilock(v->file->ip);
+      int n = readi(v->file->ip, 0, mem, v->offset + (va0 - v->addr), PGSIZE);
+      iunlock(v->file->ip);
+      if (n < 0)
+      {
+
+        kfree((void *)mem);
+        return 0;
+
+      }
+
+      int perm = PTE_U;
+      if (v->prot & PROT_READ) perm |= PTE_R;
+      if (v->prot & PROT_WRITE) perm |= PTE_W;
+      if (v->prot & PROT_EXEC) perm |= PTE_X;
+
+      if (mappages(pagetable, va0, PGSIZE, mem, perm) != 0)
+      {
+
+        kfree((void *)mem);
+        return 0;
+
+      }
+
+      return mem;
+
+    }
+
   }
+
+  if (va >= p->sz) return 0;
+  if (ismapped(pagetable, va0)) return 0;
+
   mem = (uint64) kalloc();
   if(mem == 0)
     return 0;
   memset((void *) mem, 0, PGSIZE);
-  if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
+  if (mappages(pagetable, va0, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0)
+  {
+
     kfree((void *)mem);
     return 0;
+    
   }
   return mem;
 }

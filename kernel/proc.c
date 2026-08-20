@@ -124,6 +124,9 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->vmatop = TRAPFRAME;
+  
+  for (int i = 0; i < 16; ++i) p->nvma[i].status = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -169,6 +172,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->vmatop = 0;
+
+  for (int i = 0; i < 16; ++i) p->nvma[i].status = 0;
+
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -273,6 +280,15 @@ kfork(void)
   }
   np->sz = p->sz;
 
+  np->vmatop = p->vmatop;
+  for (i = 0; i < 16; i++)
+  {
+
+    np->nvma[i] = p->nvma[i];
+    if (np->nvma[i].status) np->nvma[i].file = filedup(np->nvma[i].file);
+
+  }
+
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -327,6 +343,13 @@ kexit(int status)
 
   if(p == initproc)
     panic("init exiting");
+
+  for (int i = 0; i < 16; i++)
+  {
+
+    if(p->nvma[i].status) munmap_range(p->nvma[i].addr, p->nvma[i].len);
+
+  }
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){

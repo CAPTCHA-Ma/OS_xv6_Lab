@@ -8,6 +8,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "param.h"
+#include "memlayout.h"
 #include "stat.h"
 #include "spinlock.h"
 #include "proc.h"
@@ -502,4 +503,173 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64 sys_mmap(void)
+{
+
+  uint64 addr, len, offset;
+  int prot, flags, fd;
+  struct proc *p = myproc();
+
+  argaddr(0, &addr);
+  argaddr(1, &len);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+  argaddr(5, &offset);
+
+  len = PGROUNDUP(len);
+
+  struct file *f = p->ofile[fd];
+  if (f == 0 || f->type != FD_INODE) return -1;
+
+  if ((prot & PROT_READ) && !f->readable) return -1;
+  if ((flags & MAP_SHARED) && (prot & PROT_WRITE) && !f->writable) return -1;
+
+  struct vma *v = 0;
+  for (int i = 0; i < 16; i++)
+  {
+
+    if (p->nvma[i].status == 0)
+    {
+
+      v = &p->nvma[i];
+      break;
+
+    }
+
+  }
+
+  if (v == 0) return -1;
+
+  if (len > p->vmatop) return -1;
+
+  uint64 va = p->vmatop - len;
+
+  if(va < p->sz) return -1;
+
+  v->addr = va;
+  v->len = len;
+  v->flags = flags;
+  v->offset = offset;
+  v->prot = prot;
+  v->file = filedup(f);
+  v->status = 1;
+  p->vmatop = va;
+
+  return v->addr;
+
+}
+
+int munmap_range(uint64 addr, uint64 len)
+{
+
+  struct proc *p = myproc();
+
+  len = PGROUNDUP(len);
+
+  struct vma *v = 0;
+  for (int i = 0; i < 16; i++)
+  {
+
+    if (p->nvma[i].status && addr >= p->nvma[i].addr && addr + len <= p->nvma[i].addr + p->nvma[i].len)
+    {
+
+      v = &p->nvma[i];
+      break;
+
+    }
+
+  }
+
+  if(v == 0) return -1;
+
+  uint64 vend = v->addr + v->len;
+  uint64 end = addr + len;
+
+  if (addr > v->addr && end < vend) return -1;
+
+  for (uint64 a = addr; a < end; a += PGSIZE)
+  {
+
+    pte_t *pte = walk(p->pagetable, a, 0);
+    if (pte == 0 || (*pte & PTE_V) == 0) continue;
+
+    if ((v->flags & MAP_SHARED) && (v->prot & PROT_WRITE))
+    {
+
+      uint64 pa = PTE2PA(*pte);
+      uint64 off = v->offset + (a - v->addr);
+
+      begin_op();
+      ilock(v->file->ip);
+
+      if (off < v->file->ip->size)
+      {
+
+        uint n = PGSIZE;
+        if (off + n > v->file->ip->size) n = v->file->ip->size - off;
+
+        if (writei(v->file->ip, 0, pa, off, n) != n)
+        {
+
+          iunlock(v->file->ip);
+          end_op();
+          return -1;
+
+        }
+
+      }
+
+      iunlock(v->file->ip);
+      end_op();
+
+    }
+
+  }
+
+  uvmunmap(p->pagetable, addr, len / PGSIZE, 1);
+
+  if (addr == v->addr && end == vend)
+  {
+
+    fileclose(v->file);
+    v->file = 0;
+    v->status = 0;
+
+  } 
+  else if (addr == v->addr)
+  {
+
+    v->addr = end;
+    v->offset += len;
+    v->len = vend - end;
+
+  } 
+  else v->len = addr - v->addr;
+
+  p->vmatop = TRAPFRAME;
+
+  for (int i = 0; i < 16; i++)
+  {
+
+    if (p->nvma[i].status && p->nvma[i].addr < p->vmatop) p->vmatop = p->nvma[i].addr;
+
+  }
+
+  return 0;
+
+}
+
+uint64 sys_munmap(void)
+{
+
+  uint64 addr, len;
+
+  argaddr(0, &addr);
+  argaddr(1, &len);
+
+  return munmap_range(addr, len);
+
 }
