@@ -62,7 +62,7 @@ void recurse(char *path, char *fm, char** argv)
 
                     }
 
-                    nargv[l++] = p;
+                    nargv[l++] = buf;
                     nargv[l] = 0;
                     
                     if (fork() == 0) exec(nargv[0], nargv);
