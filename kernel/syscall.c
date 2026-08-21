@@ -141,7 +141,7 @@ syscall(void)
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
 
-    if ((1U << num) & p->sandbox_mask)
+    if ((1 << num) & p->sandbox_mask)
     {
 
       if (num == SYS_open || num == SYS_exec)
