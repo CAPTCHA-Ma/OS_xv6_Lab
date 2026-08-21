@@ -51,24 +51,16 @@ void match(char *p, int l)
 
 }
 
-int main(int argc, char *argv[])
+void process_file(char *name)
 {
 
-    if (argc != 2) 
-    {
-
-        fprintf(2, "usage: sixfive [file]\n");
-        exit(1);
-
-    }
-
-    int fd = open(argv[1], O_RDONLY);
+    int fd = open(name, O_RDONLY);
 
     if (fd < 0)
     {
 
-        fprintf(2, "sixfive: cannot open %s\n", argv[1]);
-        exit(1);
+        fprintf(2, "sixfive: cannot open %s\n", name);
+        return;
 
     }
 
@@ -114,6 +106,22 @@ int main(int argc, char *argv[])
     if (!flag) match(buf, t);
 
     close(fd);
+
+}
+
+int main(int argc, char *argv[])
+{
+
+    if (argc < 2)
+    {
+
+        fprintf(2, "usage: sixfive [file ...]\n");
+        exit(1);
+        
+    }
+
+    for (int i = 1; i < argc; ++i)
+        process_file(argv[i]);
 
     exit(0);
 
