@@ -107,7 +107,7 @@ kalloc(void)
       if(nr)
       {
 
-        kmem[nid].freelist = nr->next;
+        kmem[nid].freelist = 0;
         release(&kmem[nid].lock);
         break;
 
@@ -121,7 +121,10 @@ kalloc(void)
     {
 
       r = nr;
+      acquire(&kmem[id].lock);
+      kmem[id].freelist = r->next;
       r->next = 0;
+      release(&kmem[id].lock);
 
     }
 
